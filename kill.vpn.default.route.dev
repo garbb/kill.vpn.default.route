@@ -29,7 +29,7 @@ IncludeVersionInfo=0
 SupportXPThemes=0
 CompilerSet=3
 CompilerSettings=0000000100000000000000000
-UnitCount=2
+UnitCount=3
 
 [VersionInfo]
 Major=1
@@ -64,6 +64,15 @@ BuildCmd=
 FileName=manifest.rc
 Folder=Resources
 Compile=1
+Link=0
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit3]
+FileName=config.ini
+Folder=
+Compile=0
 Link=0
 Priority=1000
 OverrideBuildCmd=0

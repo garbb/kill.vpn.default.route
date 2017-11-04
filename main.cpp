@@ -300,7 +300,7 @@ int main() {
 	//ini section name
 	std::string inisectionname ("config");
 	//base names for ini keys
-	std::string addrbasekeyname ("addr");
+	std::string addrbasekeyname ("dest");
 	std::string maskbasekeyname ("mask");
 	// max num of keybasenameX to check
 	int max_keynum = 100;
@@ -349,7 +349,8 @@ int main() {
 	GetPrivateProfileString(inisectionname.c_str(), "VPNDesc", NULL, valuestring, sizeof(valuestring) / sizeof(valuestring[0]), inifilename.c_str());
 	//printf("%s\n", valuestring);
 	if (*valuestring == 0) {
-		printf("VPNDesc NOT FOUND\n");
+		printf("VPNDesc not found in config file\n");
+		system("pause");
 		return 1;
 	}
 	string VPNDesc = valuestring;
