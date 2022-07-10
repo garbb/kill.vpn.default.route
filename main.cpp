@@ -6,8 +6,8 @@
 
 using namespace std;
 
-#pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "Ws2_32.lib") // dev-c++ need linker param -lWs2_32
+#pragma comment(lib, "iphlpapi.lib") // dev-c++ need linker param -liphlpapi
 
 //flag to do pre-exit processing and then exit
 volatile bool exitflag = false;
@@ -27,7 +27,7 @@ class DefaultRouteSplitter {
 		//how many routes
 		int numOfRoutes;
 		
-		int addModifiedRoute(const char* dest, const char* mask) {
+		int addModifiedRoute(const char* dest, const char* mask, BOOL change = false) {
 			if (this->pRowToSplit == NULL) {
 				printf("error: no stored default route\n");
 				return 1;
@@ -37,7 +37,13 @@ class DefaultRouteSplitter {
 			this->pRowToSplit->dwForwardMask = inet_addr(mask);
 	
 			printf("adding new route for Destination=%s, Mask=%s\n\t", dest, mask);
-			DWORD dwStatus = CreateIpForwardEntry(this->pRowToSplit);
+			DWORD dwStatus;
+			if (change) {
+				dwStatus = SetIpForwardEntry(this->pRowToSplit);
+			} else {
+				dwStatus = CreateIpForwardEntry(this->pRowToSplit);
+			}
+			
 			if (dwStatus == ERROR_SUCCESS)
 				printf("route add success\n");
 			else if (dwStatus == ERROR_INVALID_PARAMETER)
@@ -85,6 +91,11 @@ class DefaultRouteSplitter {
 		}
 		
 		int splitDefaultRoute(int index, vector<string> newDestIPs, vector<string> newMaskIPs) {
+			
+			//store destination ips and masks into class members
+			this->destIPs = newDestIPs;
+			this->maskIPs = newMaskIPs;
+			this->numOfRoutes = newDestIPs.size();
 				
 			/* variables used for GetIfForwardTable */
 		    PMIB_IPFORWARDTABLE pIpForwardTable;
@@ -114,55 +125,97 @@ class DefaultRouteSplitter {
 			}
 			
 			bool foundDefaultVPNRoute = false;
+			int defaultRouteIndex;
 			for (int i = 0; i < (int) pIpForwardTable->dwNumEntries; i++) {
 				
 				//if default route (==0), and index is the index we are interested in
 				if (pIpForwardTable->table[i].dwForwardDest == 0 && pIpForwardTable->table[i].dwForwardIfIndex == index) {
 					foundDefaultVPNRoute = true;
-					printf("found default route for interface index %d\n\t", index);
-		
-					//need to put ipaddress into in_addr struct in order to be able to use inet_ntoa() to convert it to a string
-//					in_addr gateway_in_addr;
-//					gateway_in_addr.S_un.S_addr = pIpForwardTable->table[i].dwForwardNextHop;
-//					printf("Gateway=%s ", inet_ntoa(gateway_in_addr));
-						
-					//copy route row to class member so we can change it a bit and re-add it later
-					this->pRowToSplit = (PMIB_IPFORWARDROW) malloc(sizeof (MIB_IPFORWARDROW));
-					if (!this->pRowToSplit) {
-						printf("Malloc failed. Out of memory.\n");
-						free(pIpForwardTable);
-						return 1;
-					}
-					memcpy(this->pRowToSplit, &(pIpForwardTable->table[i]), sizeof (MIB_IPFORWARDROW));
-						
-					printf("deleting... ");
-					dwStatus = DeleteIpForwardEntry(&(pIpForwardTable->table[i]));
-					if (dwStatus != ERROR_SUCCESS) {
-						printf("delete FAILED\n");
-						//free(this->pRowToSplit);
-						free(pIpForwardTable);
-						return 1;
-					}
-					printf("delete success\n");
-					
-					//store destination ips and masks into class members
-					this->destIPs = newDestIPs;
-					this->maskIPs = newMaskIPs;
-					this->numOfRoutes = newDestIPs.size();
-					
-					//add new routes for VPN sites
-					for (int i = 0; i < this->numOfRoutes; i++) {
-						addModifiedRoute(this->destIPs[i].c_str(), this->maskIPs[i].c_str());
-					}
-		
-				break;	//exit for loop
+					defaultRouteIndex = i;
+					break;	//exit for loop
 				}
 			
 			}
+			
+			
+			bool foundCustomRoute = false;
+			bool foundAnyVPNRoute = false;
+			for (int i = 0; i < (int) pIpForwardTable->dwNumEntries; i++) {
+				
+				// if first one of our routes exists
+				if (pIpForwardTable->table[i].dwForwardDest == inet_addr(newDestIPs[0].c_str()) && pIpForwardTable->table[i].dwForwardIfIndex == index) {
+					foundCustomRoute = true;
+					printf("custom route for interface index %d found\n", index);
+					foundAnyVPNRoute = true;
+					break;	//exit for loop
+				}
+			
+			}
+			if (!foundCustomRoute){
+				printf("custom route for interface index %d NOT found\n", index);
+			}
+			
+			
+			if (!foundCustomRoute) {
+				for (int i = 0; i < (int) pIpForwardTable->dwNumEntries; i++) {
+					
+					// if any VPN route exists
+					if (pIpForwardTable->table[i].dwForwardIfIndex == index) {
+						foundAnyVPNRoute = true;
+						break;	//exit for loop
+					}
+				
+				}
+				if (!foundAnyVPNRoute){
+					printf("no routes for index %d found\n", index);
+				}
+			}
+			
+
+			if (foundDefaultVPNRoute) {
+				printf("default route for interface index %d found\n\t", index);
+					
+				//copy route row to class member so we can change it a bit and re-add it later
+				this->pRowToSplit = (PMIB_IPFORWARDROW) malloc(sizeof (MIB_IPFORWARDROW));
+				if (!this->pRowToSplit) {
+					printf("Malloc failed. Out of memory.\n");
+					free(pIpForwardTable);
+					return 1;
+				}
+				memcpy(this->pRowToSplit, &(pIpForwardTable->table[defaultRouteIndex]), sizeof (MIB_IPFORWARDROW));
+					
+				printf("deleting... ");
+				dwStatus = DeleteIpForwardEntry(&(pIpForwardTable->table[defaultRouteIndex]));
+				if (dwStatus != ERROR_SUCCESS) {
+					printf("delete FAILED\n");
+					//free(this->pRowToSplit);
+					free(pIpForwardTable);
+					return 1;
+				}
+				printf("delete success\n");
+				
+				//add new routes for VPN sites
+				for (int i = 0; i < this->numOfRoutes; i++) {
+					deleteModifiedRoute(this->destIPs[i].c_str(), this->maskIPs[i].c_str());
+					addModifiedRoute(this->destIPs[i].c_str(), this->maskIPs[i].c_str());
+				}
+			}
+				
+				
+			if (foundAnyVPNRoute && !foundCustomRoute) {
+				
+				//add new routes for VPN sites
+				for (int i = 0; i < this->numOfRoutes; i++) {
+					addModifiedRoute(this->destIPs[i].c_str(), this->maskIPs[i].c_str());
+				}
+
+			}
+			
+			
 			//free(this->pRowToSplit);
 			free(pIpForwardTable);
 			if (foundDefaultVPNRoute == false) {
-				printf("Couldn't find default route for interface index %d\n", index);
+				printf("default route for interface index %d NOT found\n", index);
 				return 1;
 			}
 			return 0;
@@ -309,7 +362,7 @@ int main() {
 
 	//buffers to temp hold number to be appended to keybasename and value read from ini
 	char numstring[3];
-	char valuestring[32];
+	char valuestring[100];
 	
 	
 	//make string vectors to hold addr and mask strings
@@ -347,15 +400,13 @@ int main() {
 	}
 	
 	GetPrivateProfileString(inisectionname.c_str(), "VPNDesc", NULL, valuestring, sizeof(valuestring) / sizeof(valuestring[0]), inifilename.c_str());
-	//printf("%s\n", valuestring);
+	printf("\"%s\"\n", valuestring);
 	if (*valuestring == 0) {
 		printf("VPNDesc not found in config file\n");
 		system("pause");
 		return 1;
 	}
 	string VPNDesc = valuestring;
-	
-	//printf("\n");
 	
 	//just output valuevector elements
 //		for (int idx = 0; idx < newDestIPs_v.size(); idx++) {
